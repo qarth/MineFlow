@@ -3,8 +3,11 @@ package mineflow
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 )
+
+// infCapacity is used as an effectively infinite edge capacity in the flow network.
+const infCapacity int64 = 1 << 60
 
 // PrecedenceConstraints describes the required ordering for mining blocks.
 // A constraint from "from" to "to" means that if block "from" is mined,
@@ -32,32 +35,32 @@ func (v SliceBlockValues) BlockValue(blockIndex int) int64 {
 }
 
 // ExplicitPrecedence stores precedence constraints as adjacency lists.
+// Block indices are dense [0, numBlocks), so a flat slice is used rather
+// than a map for direct indexing.
 type ExplicitPrecedence struct {
-	numBlocks   int
-	antecedents map[int][]int
+	antecedents [][]int
 }
 
 func NewExplicitPrecedence(numBlocks int) *ExplicitPrecedence {
 	return &ExplicitPrecedence{
-		numBlocks:   numBlocks,
-		antecedents: make(map[int][]int, numBlocks),
+		antecedents: make([][]int, numBlocks),
 	}
 }
 
-func (p *ExplicitPrecedence) NumBlocks() int { return p.numBlocks }
+func (p *ExplicitPrecedence) NumBlocks() int { return len(p.antecedents) }
 
+// Antecedents returns a copy of the antecedent list for the given block.
+// Callers may freely mutate the returned slice.
 func (p *ExplicitPrecedence) Antecedents(blockIndex int) []int {
-	if blockIndex < 0 || blockIndex >= p.numBlocks {
+	if blockIndex < 0 || blockIndex >= len(p.antecedents) {
 		return nil
 	}
-	vals := p.antecedents[blockIndex]
-	out := make([]int, len(vals))
-	copy(out, vals)
-	return out
+	return slices.Clone(p.antecedents[blockIndex])
 }
 
 func (p *ExplicitPrecedence) AddConstraint(from, to int) error {
-	if from < 0 || from >= p.numBlocks || to < 0 || to >= p.numBlocks {
+	n := len(p.antecedents)
+	if from < 0 || from >= n || to < 0 || to >= n {
 		return fmt.Errorf("precedence out of range: %d -> %d", from, to)
 	}
 	p.antecedents[from] = append(p.antecedents[from], to)
@@ -90,22 +93,29 @@ func (b BlockDefinition) XYZIndices(idx int) (int, int, int) {
 	return idx % b.NumX, (idx / b.NumX) % b.NumY, idx / (b.NumX * b.NumY)
 }
 
+// InBounds reports whether the 3D indices fall within the block model dimensions.
+func (b BlockDefinition) InBounds(x, y, z int) bool {
+	return x >= 0 && x < b.NumX && y >= 0 && y < b.NumY && z >= 0 && z < b.NumZ
+}
+
 // PrecedencePattern stores a collection of 3D offsets that define a precedence template.
 type PrecedencePattern struct {
 	Offsets []Vector3I
 }
 
 func NewPrecedencePattern(offsets []Vector3I) PrecedencePattern {
-	out := PrecedencePattern{Offsets: make([]Vector3I, len(offsets))}
-	copy(out.Offsets, offsets)
-	return out
+	return PrecedencePattern{Offsets: slices.Clone(offsets)}
 }
 
-func (p PrecedencePattern) OneFive() PrecedencePattern {
-	return NewPrecedencePattern([]Vector3I{{0, -1, 1}, {-1, 0, 1}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1}})
+// OneFivePrecedencePattern returns the standard 1-to-5 precedence pattern.
+func OneFivePrecedencePattern() PrecedencePattern {
+	return NewPrecedencePattern([]Vector3I{
+		{0, -1, 1}, {-1, 0, 1}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1},
+	})
 }
 
-func (p PrecedencePattern) OneNine() PrecedencePattern {
+// OneNinePrecedencePattern returns the standard 1-to-9 precedence pattern.
+func OneNinePrecedencePattern() PrecedencePattern {
 	offsets := make([]Vector3I, 0, 9)
 	for j := -1; j <= 1; j++ {
 		for i := -1; i <= 1; i++ {
@@ -141,16 +151,12 @@ func (p *Regular3DBlockModelPatternPrecedence) Antecedents(blockIndex int) []int
 
 	antecedents := make([]int, 0, len(p.pattern.Offsets))
 	for _, off := range p.pattern.Offsets {
-		candidateX := x + off.X
-		candidateY := y + off.Y
-		candidateZ := z + off.Z
-		if candidateX < 0 || candidateX >= p.blockDef.NumX || candidateY < 0 || candidateY >= p.blockDef.NumY || candidateZ < 0 || candidateZ >= p.blockDef.NumZ {
+		cx, cy, cz := x+off.X, y+off.Y, z+off.Z
+		if !p.blockDef.InBounds(cx, cy, cz) {
 			continue
 		}
-		antecedents = append(antecedents, p.blockDef.GridIndex(candidateX, candidateY, candidateZ))
+		antecedents = append(antecedents, p.blockDef.GridIndex(cx, cy, cz))
 	}
-
-	sort.Slice(antecedents, func(i, j int) bool { return antecedents[i] < antecedents[j] })
 	return antecedents
 }
 
@@ -176,7 +182,7 @@ func NewPseudoSolverFromValues(precedence PrecedenceConstraints, values BlockVal
 		return nil, errors.New("block values are required")
 	}
 	blockValues := make([]int64, values.NumBlocks())
-	for i := 0; i < values.NumBlocks(); i++ {
+	for i := range blockValues {
 		blockValues[i] = values.BlockValue(i)
 	}
 	return NewPseudoSolver(precedence, blockValues)
@@ -191,13 +197,13 @@ func (s *PseudoSolver) Solve() ([]bool, error) {
 	n := s.precedence.NumBlocks()
 	source := n
 	sink := n + 1
-	dinic := newDinic(n + 2)
+	d := newDinic(n + 2)
 
 	for i, value := range s.values {
 		if value > 0 {
-			dinic.addEdge(source, i, value)
+			d.addEdge(source, i, value)
 		} else if value < 0 {
-			dinic.addEdge(i, sink, -value)
+			d.addEdge(i, sink, -value)
 		}
 	}
 
@@ -206,75 +212,92 @@ func (s *PseudoSolver) Solve() ([]bool, error) {
 			if to < 0 || to >= n {
 				return nil, fmt.Errorf("precedence target out of range: %d -> %d", from, to)
 			}
-			dinic.addEdge(from, to, int64(1<<60))
+			d.addEdge(from, to, infCapacity)
 		}
 	}
 
-	_ = dinic.maxFlow(source, sink)
+	_ = d.maxFlow(source, sink)
 
-	seen := dinic.reachableFrom(source)
-	inCut := make([]bool, n)
-	for i := 0; i < n; i++ {
-		inCut[i] = seen[i]
-	}
-	return inCut, nil
+	return d.reachableFrom(source)[:n], nil
 }
 
-// SolveUltimatePit is a small convenience wrapper that mirrors the README example.
-func SolveUltimatePit(values []int64, precedence [][]int64) []bool {
+// SolveUltimatePit is a convenience wrapper that mirrors the README example.
+// It returns the blocks in the optimal pit and any error encountered.
+func SolveUltimatePit(values []int64, precedence [][]int64) ([]bool, error) {
 	p := NewExplicitPrecedence(len(values))
 	for _, pair := range precedence {
 		if len(pair) != 2 {
-			continue
+			return nil, fmt.Errorf("precedence pair has %d elements, want 2", len(pair))
 		}
-		_ = p.AddConstraint(int(pair[0]), int(pair[1]))
+		if err := p.AddConstraint(int(pair[0]), int(pair[1])); err != nil {
+			return nil, err
+		}
 	}
 	solver, err := NewPseudoSolver(p, values)
 	if err != nil {
-		return make([]bool, len(values))
+		return nil, err
 	}
-	inCut, err := solver.Solve()
-	if err != nil {
-		return make([]bool, len(values))
-	}
-	return inCut
+	return solver.Solve()
 }
+
+// --- Dinic max-flow implementation using a flat edge pool ---
+//
+// Edges are stored contiguously to avoid per-edge heap allocations.
+// Adjacency is tracked via a linked-list-per-node using head/next arrays.
 
 type edge struct {
 	to  int
 	cap int64
-	rev int
+	rev int // index into edges slice of the reverse edge
 }
 
 type dinic struct {
-	g [][]*edge
+	head  []int  // head[node] = index of first edge, -1 if none
+	next  []int  // next[edgeIdx] = index of next edge from same node, -1 if none
+	edges []edge // flat contiguous edge pool
 }
 
 func newDinic(n int) *dinic {
-	g := make([][]*edge, n)
-	return &dinic{g: g}
+	head := make([]int, n)
+	for i := range head {
+		head[i] = -1
+	}
+	return &dinic{head: head}
 }
 
 func (d *dinic) addEdge(from, to int, cap int64) {
-	fwd := &edge{to: to, cap: cap, rev: len(d.g[to])}
-	rev := &edge{to: from, cap: 0, rev: len(d.g[from])}
-	d.g[from] = append(d.g[from], fwd)
-	d.g[to] = append(d.g[to], rev)
+	fwdIdx := len(d.edges)
+	revIdx := fwdIdx + 1
+	d.edges = append(d.edges,
+		edge{to: to, cap: cap, rev: revIdx},
+		edge{to: from, cap: 0, rev: fwdIdx},
+	)
+	d.next = append(d.next, d.head[from], d.head[to])
+	d.head[from] = fwdIdx
+	d.head[to] = revIdx
 }
 
 func (d *dinic) maxFlow(source, sink int) int64 {
+	n := len(d.head)
 	flow := int64(0)
+
+	// Pre-allocate BFS and DFS scratch space; reused across iterations.
+	level := make([]int, n)
+	queue := make([]int, 0, n)
+	it := make([]int, n)
+
 	for {
-		level := make([]int, len(d.g))
+		// BFS to build level graph.
 		for i := range level {
 			level[i] = -1
 		}
 		level[source] = 0
-		queue := []int{source}
-		for len(queue) > 0 {
-			cur := queue[0]
-			queue = queue[1:]
-			for _, e := range d.g[cur] {
+		queue = queue[:0]
+		queue = append(queue, source)
+		for front := 0; front < len(queue); front++ {
+			cur := queue[front]
+			for ei := d.head[cur]; ei != -1; ei = d.next[ei] {
+				e := &d.edges[ei]
 				if e.cap > 0 && level[e.to] < 0 {
 					level[e.to] = level[cur] + 1
 					queue = append(queue, e.to)
@@ -285,28 +308,31 @@ func (d *dinic) maxFlow(source, sink int) int64 {
 			break
 		}
 
-		it := make([]int, len(d.g))
+		// DFS to push blocking flow.
+		copy(it, d.head)
 		var dfs func(int, int64) int64
 		dfs = func(node int, pushed int64) int64 {
 			if node == sink {
 				return pushed
 			}
-			for ; it[node] < len(d.g[node]); it[node]++ {
-				e := d.g[node][it[node]]
+			for it[node] != -1 {
+				ei := it[node]
+				e := &d.edges[ei]
 				if e.cap > 0 && level[e.to] == level[node]+1 {
-					res := dfs(e.to, min64(pushed, e.cap))
+					res := dfs(e.to, min(pushed, e.cap))
 					if res > 0 {
 						e.cap -= res
-						d.g[e.to][e.rev].cap += res
+						d.edges[e.rev].cap += res
 						return res
 					}
 				}
+				it[node] = d.next[ei]
 			}
 			return 0
 		}
 
 		for {
-			pushed := dfs(source, int64(1<<60))
+			pushed := dfs(source, infCapacity)
 			if pushed == 0 {
 				break
 			}
@@ -317,13 +343,14 @@ func (d *dinic) maxFlow(source, sink int) int64 {
 }
 
 func (d *dinic) reachableFrom(source int) []bool {
-	seen := make([]bool, len(d.g))
-	queue := []int{source}
+	seen := make([]bool, len(d.head))
+	queue := make([]int, 0, len(d.head))
 	seen[source] = true
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, e := range d.g[cur] {
+	queue = append(queue, source)
+	for front := 0; front < len(queue); front++ {
+		cur := queue[front]
+		for ei := d.head[cur]; ei != -1; ei = d.next[ei] {
+			e := &d.edges[ei]
 			if e.cap > 0 && !seen[e.to] {
 				seen[e.to] = true
 				queue = append(queue, e.to)
@@ -331,11 +358,4 @@ func (d *dinic) reachableFrom(source int) []bool {
 		}
 	}
 	return seen
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }
