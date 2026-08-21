@@ -3,12 +3,13 @@ These are regular block models.
 Blocks are in order from the leftmost (smallest x), frontmost (smallest y), lowest (smallest z), to the rightmost (largest x), backmost (largest y), highest (largest z).
 x cycles fastest, then y, then z.
 
-bauxitemed: 120x120x26
-cucase: 170x215x50
-cupipe: 180x180x85
-mclaughlingeo: 140x296x68
-sim2d76: 75x1x40
-
+bauxitemed: 120x120x26			// cmd 120 120 26 45
+cucase: 170x215x50				// cmd 170 215 50 45
+cupipe: 180x180x85				// cmd 180 180 85 45
+mclaughlingeo: 140x296x68 		// cmd 140 296 68 45
+sim2d76: 75x1x40				// cmd 75 1 40 45
+cusim_2754000: 180x180x85		// cmd 180 180 85 45
+casestudy_1827500: 170x215x50	//cmd 170 215 50 45
 ``` Go
 Note how the IJK block index is used to shape the index to a grid of number x blocks, num y blocks, num z block which form the grid bounds.
 // Vector3I is a simple 3D integer offset.

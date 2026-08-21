@@ -401,7 +401,7 @@ func main() {
 	}
 
 	readInput := time.Now()
-	fmt.Println("  MineFlow - Version 1.0")
+	fmt.Println("  MineFlow - Go Version 1.0")
 	fmt.Println("--------------------------")
 	fmt.Println("Num blocks  :", numBlocks)
 
