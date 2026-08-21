@@ -1,3 +1,8 @@
 build/
 *.swp
 *.mexw64
+
+# Built executables and CLI output files
+cmd/mineflow/mineflow.exe
+cmd/mineflow/*_output.txt
+cmd/mineflow/02_output.txt
