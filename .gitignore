@@ -6,3 +6,5 @@ build/
 cmd/mineflow/mineflow.exe
 cmd/mineflow/*_output.txt
 cmd/mineflow/02_output.txt
+cmd/mineflow/*.stl
+cmd/mineflow/*.png
