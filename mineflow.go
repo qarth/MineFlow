@@ -139,19 +139,19 @@ func (v SliceBlockValues) SetBlockValue(blockIndex int, value int64) {
 }
 
 // ExplicitPrecedence stores precedence constraints as adjacency lists.
+// Block indices are dense [0, numBlocks), so a flat slice is used rather
+// than a map for direct indexing.
 type ExplicitPrecedence struct {
-	numBlocks   int
-	antecedents map[int][]int
+	antecedents [][]int
 }
 
 func NewExplicitPrecedence(numBlocks int) *ExplicitPrecedence {
 	return &ExplicitPrecedence{
-		numBlocks:   numBlocks,
-		antecedents: make(map[int][]int, numBlocks),
+		antecedents: make([][]int, numBlocks),
 	}
 }
 
-func (p *ExplicitPrecedence) NumBlocks() int { return p.numBlocks }
+func (p *ExplicitPrecedence) NumBlocks() int { return len(p.antecedents) }
 
 func (p *ExplicitPrecedence) Antecedents(fromBlockIndex int) iter.Seq[int] {
 	return func(yield func(int) bool) {
@@ -169,7 +169,8 @@ func (p *ExplicitPrecedence) Antecedents(fromBlockIndex int) iter.Seq[int] {
 // AddConstraint adds a precedence constraint: if "from" is mined, "to" must
 // also be mined.
 func (p *ExplicitPrecedence) AddConstraint(from, to int) error {
-	if from < 0 || from >= p.numBlocks || to < 0 || to >= p.numBlocks {
+	n := len(p.antecedents)
+	if from < 0 || from >= n || to < 0 || to >= n {
 		return fmt.Errorf("precedence out of range: %d -> %d", from, to)
 	}
 	p.antecedents[from] = append(p.antecedents[from], to)
@@ -183,9 +184,11 @@ func SolveUltimatePit(values []int64, precedence [][]int64) []bool {
 	p := NewExplicitPrecedence(len(values))
 	for _, pair := range precedence {
 		if len(pair) != 2 {
-			continue
+			return nil, fmt.Errorf("precedence pair has %d elements, want 2", len(pair))
 		}
-		_ = p.AddConstraint(int(pair[0]), int(pair[1]))
+		if err := p.AddConstraint(int(pair[0]), int(pair[1])); err != nil {
+			return nil, err
+		}
 	}
 	solver, err := NewPseudoSolver(p, SliceBlockValues(values))
 	if err != nil {
