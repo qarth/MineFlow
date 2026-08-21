@@ -1,0 +1,6 @@
+services:
+  mineflow:
+    image: mineflow
+    build:
+      context: .
+      dockerfile: ./Dockerfile

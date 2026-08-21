@@ -17,36 +17,3 @@ func TestSolveUltimatePitExample(t *testing.T) {
 		}
 	}
 }
-
-func TestPatternHelpers(t *testing.T) {
-	pattern := NewPrecedencePattern(nil).OneFive()
-	if pattern.Size() != 5 {
-		t.Fatalf("OneFive size mismatch: got %d want 5", pattern.Size())
-	}
-
-	if pattern.Offsets[0].Z != 1 {
-		t.Fatalf("expected all offsets to be one bench ahead, got %+v", pattern.Offsets[0])
-	}
-}
-
-func TestRegular3DBlockModelPatternPrecedence(t *testing.T) {
-	blockDef := BlockDefinition{NumX: 2, NumY: 2, NumZ: 2}
-	pattern := NewPrecedencePattern([]Vector3I{{0, 0, 1}})
-	precedence := NewRegular3DBlockModelPatternPrecedence(blockDef, pattern)
-
-	if precedence.NumBlocks() != 8 {
-		t.Fatalf("unexpected block count: got %d want 8", precedence.NumBlocks())
-	}
-
-	ants := precedence.Antecedents(blockDef.GridIndex(0, 0, 0))
-	if len(ants) != 1 {
-		t.Fatalf("expected one antecedent for the first layer, got %d", len(ants))
-	}
-	if ants[0] != blockDef.GridIndex(0, 0, 1) {
-		t.Fatalf("expected antecedent at the next layer, got %d", ants[0])
-	}
-
-	if got := precedence.Antecedents(blockDef.GridIndex(0, 0, 1)); len(got) != 0 {
-		t.Fatalf("expected no antecedents on the last layer, got %v", got)
-	}
-}

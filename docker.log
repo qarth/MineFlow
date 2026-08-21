@@ -1,0 +1,6 @@
+ Executing task: & 'C:\Program Files\Docker\Docker\resources\bin\docker.EXE' build --pull --rm -f 'Dockerfile' -t 'mineflow:latest' '.' 
+
+ERROR: error during connect: Head "http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/_ping": open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.
+
+ *  The terminal process "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Command & 'C:\Program Files\Docker\Docker\resources\bin\docker.EXE' build --pull --rm -f 'Dockerfile' -t 'mineflow:latest' '.'" terminated with exit code: 1. 
+ *  Terminal will be reused by tasks, press any key to close it.
